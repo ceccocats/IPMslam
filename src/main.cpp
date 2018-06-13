@@ -37,29 +37,6 @@ struct particle_t {
 };
 const int N_PART = 1000;
 
-void undistortImage(Mat & image, Mat & outputImage, 
-    Mat & cameraMatrix, Mat & distCoeffs) {
-
-    // setup enlargement and offset for new image
-    Size imageSize = image.size();
-    imageSize.height += 2*y_shift;
-    imageSize.width += 2*x_shift;
-
-    // create a new camera matrix with the principal point 
-    // offest according to the offset above
-    Mat newCameraMatrix = cameraMatrix.clone();
-    newCameraMatrix.at<double>(0, 2) += x_shift; //adjust c_x by x_shift
-    newCameraMatrix.at<double>(1, 2) += y_shift; //adjust c_y by y_shift
-
-    // create undistortion maps
-    Mat map1;
-    Mat map2;
-    initUndistortRectifyMap(cameraMatrix, distCoeffs, Mat(), 
-        newCameraMatrix, imageSize, CV_16SC2, map1, map2);
-
-    //remap
-    remap(image, outputImage, map1, map2, INTER_LINEAR);
-}
 
 int main( int _argc, char** _argv )
 {
@@ -216,7 +193,7 @@ int main( int _argc, char** _argv )
 		cvtColor(inputImg, inputImgGray, CV_BGR2GRAY);				 		 	
 	
 
-		 // Process
+		 // Process IPM
 		clock_t begin = clock();
 		ipm->applyHomography( inputImgGray, top );		 
 		clock_t end = clock();
@@ -224,30 +201,14 @@ int main( int _argc, char** _argv )
 		printf("%.2f (ms)\r", 1000*elapsed_secs);
 		ipm->drawPoints(origPoints, inputImg );
 		
-
+		// thresh
 		resize(top, outputImg, Size(), 0.05, 0.05);
 		blur(outputImg, occgrid, Size(3, 3));
-		/*
-		//Canny(outputImg, top, 40, 100, 3);
-		//threshold(top, outputImg, slider[4], 255, CV_THRESH_BINARY  CV_THRESH_OTSU);
-		*/
-		//threshold(occgrid, occgrid, slider[4], 255, CV_THRESH_BINARY);
 		adaptiveThreshold(occgrid, occgrid, 255, CV_ADAPTIVE_THRESH_MEAN_C,THRESH_BINARY,7,-slider[4]);
 		
 		// View		
 		resize(inputImg, showImg0, Size(), 0.3, 0.3);
 		imshow("roadslam", showImg0);
-
-/*
-		Mat occgrid_big;
-	    copyMakeBorder(occgrid, occgrid_big, occgrid.rows, occgrid.rows, occgrid.cols/2, occgrid.cols/2,BORDER_CONSTANT, 0);
-
-		Point2f src_center(occgrid_big.cols/2.0F, occgrid_big.rows/2.0F + occgrid.rows/2.0F);
-		Mat rot_mat = getRotationMatrix2D(src_center, 0, 1.0);
-		Mat occgrid_r;
-		warpAffine(occgrid_big, occgrid_r, rot_mat, occgrid_r.size());
-		imshow("output", occgrid_r);
-*/
 
 		const float dt = 0.033;
 		const float mt2grid = 90.0/8.0;
@@ -265,14 +226,15 @@ int main( int _argc, char** _argv )
 			double ry   = (((double) rand() / (RAND_MAX)) - 0.5f)*0.2f*mt2grid;
 			double ryaw = (((double) rand() / (RAND_MAX)) - 0.5f)*0.005f;
 
-			part->x += cos(yaw)*odoms[frameNum].speed*dt*mt2grid + rx;
-			part->y += sin(yaw)*odoms[frameNum].speed*dt*mt2grid + ry;
 			part->yaw = -odoms[frameNum].yaw + ryaw;
+			double yaw_sin = sin(part->yaw);
+			double yaw_cos = cos(part->yaw);
+
+			part->x += yaw_cos*odoms[frameNum].speed*dt*mt2grid + rx;
+			part->y += yaw_sin*odoms[frameNum].speed*dt*mt2grid + ry;
 
 			int pi = part->y;
 			int pj = part->x;
-			double yaw_sin = sin(yaw);
-			double yaw_cos = cos(yaw);
 			for(int i=0; i<occgrid.rows; i++) {
 				for(int j=0; j<occgrid.cols; j++) {
 					uint8_t val = occgrid.data[i*occgrid.cols + j];
