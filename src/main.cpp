@@ -1,16 +1,3 @@
-/*
- * Project:  Inverse Perspective Mapping
- *
- * File:     main.cpp
- *
- * Contents: Creation, initialisation and usage of IPM object
- *           for the generation of Inverse Perspective Mappings of images or videos
- *
- * Author:   Marcos Nieto <marcos.nieto.doncel@gmail.com>
- * Date:	 22/02/2014
- * Homepage: http://marcosnietoblog.wordpress.com/
- */
-
 #include "opencv2/core/core.hpp"
 #include "opencv2/highgui/highgui.hpp"
 #include "opencv2/imgproc/imgproc.hpp"
