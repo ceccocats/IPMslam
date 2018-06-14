@@ -24,6 +24,7 @@ struct particle_t {
 };
 const int N_PART = 1000;
 
+const double CAM_DST = 7.45;
 
 int main( int _argc, char** _argv )
 {
@@ -209,9 +210,9 @@ int main( int _argc, char** _argv )
 			particle_t *part = &particles[p];
 			part->score = 0;
 
-			double rx   = (((double) rand() / (RAND_MAX)) - 0.5f)*0.2f*mt2grid;
-			double ry   = (((double) rand() / (RAND_MAX)) - 0.5f)*0.2f*mt2grid;
-			double ryaw = (((double) rand() / (RAND_MAX)) - 0.5f)*0.005f;
+			double rx   = (((double) rand() / (RAND_MAX)) - 0.5f)*0.1f*mt2grid;
+			double ry   = (((double) rand() / (RAND_MAX)) - 0.5f)*0.1f*mt2grid;
+			double ryaw = (((double) rand() / (RAND_MAX)) - 0.5f)*0.01f;
 
 			part->yaw = -odoms[frameNum].yaw + ryaw;
 			double yaw_sin = sin(part->yaw);
@@ -226,7 +227,7 @@ int main( int _argc, char** _argv )
 				for(int j=0; j<occgrid.cols; j++) {
 					uint8_t val = occgrid.data[i*occgrid.cols + j];
 					double lx = j - occgrid.cols/2;
-					double ly = i - occgrid.rows - 7.45*mt2grid;
+					double ly = i - occgrid.rows - CAM_DST*mt2grid;
 					int li = lx*yaw_cos - ly*yaw_sin;
 					int lj = lx*yaw_sin + ly*yaw_cos;
 					int gi = pi + li;
@@ -266,7 +267,7 @@ int main( int _argc, char** _argv )
 					for(int j=0; j<occgrid.cols; j++) {
 						uint8_t val = occgrid.data[i*occgrid.cols + j];
 						double lx = j - occgrid.cols/2;
-						double ly = i - occgrid.rows - 7.5*mt2grid;
+						double ly = i - occgrid.rows - CAM_DST*mt2grid;
 						int li = lx*yaw_cos - ly*yaw_sin;
 						int lj = lx*yaw_sin + ly*yaw_cos;
 						int gi = pi + li;
