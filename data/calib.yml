@@ -9,3 +9,15 @@ dist_coefs: !!opencv-matrix
    cols: 1
    dt: d
    data: [ -3.0651265382766724e-01, 9.6565194427967072e-02, -1.2937861494719982e-02, 0., 0. ]
+
+ipm_front: !!opencv-matrix
+   rows: 1
+   cols: 4
+   dt: d
+   data: [ 955, 472, 178, 74 ]
+
+ipm_back: !!opencv-matrix
+   rows: 1
+   cols: 4
+   dt: d
+   data: [ 955, 608, 178, 74 ]
