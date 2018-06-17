@@ -5,12 +5,16 @@
 #include <stdio.h>
 #include <ctime>
 #include <fstream>
-using namespace cv;
-
-#include "IPM.h"
+#include <pcl/point_types.h>
+#include <pcl/registration/icp.h>
+#include <pcl/visualization/cloud_viewer.h>
 
 using namespace cv;
 using namespace std;
+
+#include "IPM.h"
+
+
 
 const double y_shift = 0;
 const double x_shift = 0;
@@ -20,10 +24,8 @@ struct odom_t {
 };
 
 struct particle_t {
-	float x, y, yaw, score;
+	float x, y;
 };
-const int N_PART = 1000;
-
 const double CAM_DST = 7.45;
 
 int main( int _argc, char** _argv )
@@ -123,19 +125,14 @@ int main( int _argc, char** _argv )
 		odoms.push_back(o);
 	}
 
-	// global map
-	Mat gOG = cv::Mat::zeros(cv::Size(4000,4000), CV_8U);
+	pcl::PointCloud<pcl::PointXYZ>::Ptr frameCloud(new pcl::PointCloud<pcl::PointXYZ>); 
+	pcl::PointCloud<pcl::PointXYZ>::Ptr gCloud(new pcl::PointCloud<pcl::PointXYZ>);
 
-	Point2f pose(gOG.cols*0.7, gOG.rows*0.7);
-	float yaw = -M_PI/2;
+    pcl::visualization::CloudViewer viewer ("Cloud Viewer");
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr vizCloud(new pcl::PointCloud<pcl::PointXYZRGB>); 
 
-	particle_t particles[N_PART];
-	for(int i=0; i<N_PART; i++) {
-		particles[i].x = pose.x;
-		particles[i].y = pose.y;
-		particles[i].yaw = yaw;
-		particles[i].score = 0;
-	}
+	Point2f pose(0, 0);
+	double yaw = 0;
 
 	// Main loop
 	int frameNum = 0;
@@ -193,124 +190,76 @@ int main( int _argc, char** _argv )
 		resize(top, outputImg, Size(), 0.05, 0.05);
 		blur(outputImg, occgrid, Size(3, 3));
 		adaptiveThreshold(occgrid, occgrid, 255, CV_ADAPTIVE_THRESH_MEAN_C,THRESH_BINARY,7,-slider[4]);
-		
-		// View		
-		resize(inputImg, showImg0, Size(), 0.3, 0.3);
-		imshow("roadslam", showImg0);
-
-		const float dt = 0.033;
-		const float mt2grid = 90.0/8.0;
-
-		float score_sum = 0;
-		float max_score = 0;
-		int best_part = 0;
-
-		#pragma omp parallel for
-		for(int p=0; p<N_PART; p++) {
-			particle_t *part = &particles[p];
-			part->score = 0;
-
-			double rx   = (((double) rand() / (RAND_MAX)) - 0.5f)*0.1f*mt2grid;
-			double ry   = (((double) rand() / (RAND_MAX)) - 0.5f)*0.1f*mt2grid;
-			double ryaw = (((double) rand() / (RAND_MAX)) - 0.5f)*0.01f;
-
-			part->yaw = -odoms[frameNum].yaw + ryaw;
-			double yaw_sin = sin(part->yaw);
-			double yaw_cos = cos(part->yaw);
-
-			part->x += yaw_cos*odoms[frameNum].speed*dt*mt2grid + rx;
-			part->y += yaw_sin*odoms[frameNum].speed*dt*mt2grid + ry;
-
-			int pi = part->y;
-			int pj = part->x;
-			for(int i=0; i<occgrid.rows; i++) {
-				for(int j=0; j<occgrid.cols; j++) {
-					uint8_t val = occgrid.data[i*occgrid.cols + j];
-					double lx = j - occgrid.cols/2;
-					double ly = i - occgrid.rows - CAM_DST*mt2grid;
-					int li = lx*yaw_cos - ly*yaw_sin;
-					int lj = lx*yaw_sin + ly*yaw_cos;
-					int gi = pi + li;
-					int gj = pj - lj;	
-					uint8_t gval = gOG.data[ gi*gOG.cols + gj];
-
-					part->score += (255 - abs(gval - val));
-				}
-			}
-
-			#pragma omp critical
-			{
-			score_sum += part->score;
-			if(part->score > max_score) {
-				max_score = part->score;
-				best_part = p;
-			}
-		}
-		}
-		std::cout<<"best score: "<<max_score<<", sum: "<<score_sum<<"\n";
-
-		// update best pose 
-		pose.x = particles[best_part].x;
-		pose.y = particles[best_part].y;
-		yaw    = particles[best_part].yaw;
-
-		#pragma omp parallel sections
-		{
-			#pragma omp section
-			{ 
-				// write data on global map
-				int pi = pose.y;
-				int pj = pose.x;
-				double yaw_sin = sin(yaw);
-				double yaw_cos = cos(yaw);
-				for(int i=0; i<occgrid.rows; i++) {
-					for(int j=0; j<occgrid.cols; j++) {
-						uint8_t val = occgrid.data[i*occgrid.cols + j];
-						double lx = j - occgrid.cols/2;
-						double ly = i - occgrid.rows - CAM_DST*mt2grid;
-						int li = lx*yaw_cos - ly*yaw_sin;
-						int lj = lx*yaw_sin + ly*yaw_cos;
-						int gi = pi + li;
-						int gj = pj - lj;	
-						uint8_t gval = gOG.data[ gi*gOG.cols + gj];
-						if(val > 0 && gval < (255-20))
-							gOG.data[ gi*gOG.cols + gj] += 20;
-						if(val <= 0 && gval > 5)
-							gOG.data[ gi*gOG.cols + gj] -= 5;
-					}
-				}
-			}
-
-			#pragma omp section
-			{ 
-				// resampling 
-				int resampled = 0;
-				for(int p=0; p<N_PART; p++) {
-					particle_t *part = &particles[p];
-					if(part->score < score_sum/N_PART) {
-						resampled++;
-						particles[p] = particles[best_part];
-					}
-				}
-				std::cout<<"resampled: "<<resampled<<"\n";
-			}
-		}
-	
-
-		//circle(gOG, Point(pj, pi), 10, Scalar(255, 0, 0));
 		imshow("local map", occgrid);
+		
+		float dt = 0.033;
+		float grid2mt = 10.0/90.0;
 
-				
-		// View		
-		resize(gOG, showImg0, Size(), 0.25, 0.25);
-		imshow("global map", showImg0);
+		yaw = odoms[frameNum].yaw;
+		double yaw_sin = sin(yaw);
+		double yaw_cos = cos(yaw);
+		pose.x += yaw_cos*odoms[frameNum].speed*dt;
+		pose.y += yaw_sin*odoms[frameNum].speed*dt;
+
+		particle_t pts[100*100];
+		int n_pts = 0;
+		for(int i=0; i<occgrid.rows; i++) {
+			for(int j=0; j<occgrid.cols; j++) {
+				uint8_t val = occgrid.data[i*occgrid.cols + j];
+				double ly = j - occgrid.cols/2;
+				double lx = -i + occgrid.rows - CAM_DST*grid2mt;
+				double rx = lx*yaw_cos - ly*yaw_sin;
+				double ry = lx*yaw_sin + ly*yaw_cos;
+
+				if(val > 0) {
+					pts[n_pts].x = pose.x + double(rx)*grid2mt;
+					pts[n_pts].y = pose.y + double(ry)*grid2mt;
+					n_pts++;
+				}
+			}
+		}
+
+		int size = n_pts;
+		frameCloud->points.resize(size);
+		for(int i=0; i<size; i++) {
+			frameCloud->points[i].x = pts[i].x;
+			frameCloud->points[i].z = pts[i].y;
+			frameCloud->points[i].y = 0;
+		}
+
+    	if(frameNum == 100)
+			*gCloud = *frameCloud;
+
+    	// run ICP
+		pcl::PointCloud<pcl::PointXYZ> Final;
+    	pcl::IterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
+    	icp.setInputCloud(frameCloud);
+    	icp.setInputTarget(gCloud);
+    	icp.align(Final);
+
+		size = gCloud->points.size();
+		int new_size = Final.points.size() + size;
+		gCloud->points.resize(new_size);
+		for(int i=size; i<new_size; i++) {
+			gCloud->points[i].x = Final.points[i- size].x;
+			gCloud->points[i].z = Final.points[i- size].z;
+		}
+
+		pcl::copyPointCloud(*gCloud,*vizCloud);
+		for(int i=0; i<vizCloud->points.size(); i++) {
+			// pack r/g/b into rgb
+			uint8_t r = 255, g = 0, b = 0;    // Example: Red color
+			uint32_t rgb = ((uint32_t)r << 16 | (uint32_t)g << 8 | (uint32_t)b);
+			vizCloud->points[i].rgb = *reinterpret_cast<float*>(&rgb);
+		}
+		viewer.showCloud (vizCloud);
+					
 
 		int key = waitKey(1);
 		if(key == 114)
 			ipm = NULL;
 
 	}
-	imwrite("map.png", gOG);
 
 	return 0;	
 }		
