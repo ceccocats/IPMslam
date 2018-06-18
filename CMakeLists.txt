@@ -20,6 +20,15 @@ if (OPENMP_FOUND)
     set (CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${OpenMP_EXE_LINKER_FLAGS}")
 endif()
 
+set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
+
+# include ROS
+include_directories(/opt/ros/kinetic/include)
+link_directories(/opt/ros/kinetic/lib)
+set(ROS_LIBRARIES roscpp rosconsole roscpp_serialization 
+                  rostime tf boost_system)
+
+
 # Includes
 include_directories(	
 	${OPENCV_INCLUDE_DIR}
@@ -35,7 +44,7 @@ set(SOURCE_FILES
 
 # Add executable and target link libraries
 ADD_EXECUTABLE( ipm ${SOURCE_FILES})
-TARGET_LINK_LIBRARIES( ipm ${OpenCV_LIBS} ${PCL_LIBRARIES})
+TARGET_LINK_LIBRARIES( ipm ${OpenCV_LIBS} ${PCL_LIBRARIES} ${ROS_LIBRARIES})
 
 add_executable (icp src/icp.cpp)
 target_link_libraries (icp ${PCL_LIBRARIES})

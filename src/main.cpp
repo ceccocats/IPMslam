@@ -5,9 +5,17 @@
 #include <stdio.h>
 #include <ctime>
 #include <fstream>
+#include <string>
+#include <pcl/io/pcd_io.h>
 #include <pcl/point_types.h>
 #include <pcl/registration/icp.h>
 #include <pcl/visualization/cloud_viewer.h>
+#include <pcl/visualization/pcl_visualizer.h>
+#include <pcl/conversions.h>
+#include <pcl/PCLPointCloud2.h>
+#include "ros/ros.h"
+#include "sensor_msgs/PointCloud2.h"
+#include "pcl_conversions/pcl_conversions.h"
 
 using namespace cv;
 using namespace std;
@@ -28,21 +36,27 @@ struct particle_t {
 };
 const double CAM_DST = 7.45;
 
-int main( int _argc, char** _argv )
+int main( int argc, char** argv )
 {
+
+    ros::init(argc, argv, "ipm_cloud");
+    ros::NodeHandle n;
+    ros::Publisher pub = n.advertise<sensor_msgs::PointCloud2>("velodyne_points", 0);
+
+
 	// Images
 	cv::Mat frame;
 	Mat inputImg, inputImgGray, calibImg, showImg0;
 	Mat top, outputImg, occgrid;
 	
-	if( _argc != 4 )
+	if( argc != 4 )
 	{
 		cout << "Usage: ipm.exe <videofile> <calib.yml> <data.poses>" << endl;
 		return 1;
 	}	
-	string videoFileName  = _argv[1];	
-	string yml_filename   = _argv[2];	
-	string poses_filename = _argv[3];	
+	string videoFileName  = argv[1];	
+	string yml_filename   = argv[2];	
+	string poses_filename = argv[3];	
 
 	// Video
 	cv::VideoCapture video;
@@ -64,7 +78,7 @@ int main( int _argc, char** _argv )
 	slider[1] = 472;
 	slider[2] = 178;
 	slider[3] = 74;
-	slider[4] = 1;//166;
+	slider[4] = 2;//166;
     /*
 	slider[0] = 1500;
 	slider[1] = 580;
@@ -126,10 +140,13 @@ int main( int _argc, char** _argv )
 	}
 
 	pcl::PointCloud<pcl::PointXYZ>::Ptr frameCloud(new pcl::PointCloud<pcl::PointXYZ>); 
-	pcl::PointCloud<pcl::PointXYZ>::Ptr gCloud(new pcl::PointCloud<pcl::PointXYZ>);
 
-    pcl::visualization::CloudViewer viewer ("Cloud Viewer");
-    pcl::PointCloud<pcl::PointXYZRGB>::Ptr vizCloud(new pcl::PointCloud<pcl::PointXYZRGB>); 
+/*
+    pcl::visualization::PCLVisualizer viewer ("Cloud Viewer");
+	viewer.setBackgroundColor (0, 0, 0);
+  	viewer.addPointCloud<pcl::PointXYZ> (frameCloud, "cloud");
+  	viewer.setPointCloudRenderingProperties (pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 1, "cloud");
+*/
 
 	Point2f pose(0, 0);
 	double yaw = 0;
@@ -195,19 +212,19 @@ int main( int _argc, char** _argv )
 		float dt = 0.033;
 		float grid2mt = 10.0/90.0;
 
-		yaw = odoms[frameNum].yaw;
+		//yaw = -odoms[frameNum].yaw;
 		double yaw_sin = sin(yaw);
 		double yaw_cos = cos(yaw);
-		pose.x += yaw_cos*odoms[frameNum].speed*dt;
-		pose.y += yaw_sin*odoms[frameNum].speed*dt;
+		//pose.x += yaw_cos*odoms[frameNum].speed*dt;
+		//pose.y += yaw_sin*odoms[frameNum].speed*dt;
 
 		particle_t pts[100*100];
 		int n_pts = 0;
 		for(int i=0; i<occgrid.rows; i++) {
 			for(int j=0; j<occgrid.cols; j++) {
 				uint8_t val = occgrid.data[i*occgrid.cols + j];
-				double ly = j - occgrid.cols/2;
-				double lx = -i + occgrid.rows - CAM_DST*grid2mt;
+				double lx = occgrid.cols/2 - j;
+				double ly = occgrid.rows - i; //- CAM_DST*grid2mt;
 				double rx = lx*yaw_cos - ly*yaw_sin;
 				double ry = lx*yaw_sin + ly*yaw_cos;
 
@@ -222,40 +239,28 @@ int main( int _argc, char** _argv )
 		int size = n_pts;
 		frameCloud->points.resize(size);
 		for(int i=0; i<size; i++) {
-			frameCloud->points[i].x = pts[i].x;
-			frameCloud->points[i].z = pts[i].y;
-			frameCloud->points[i].y = 0;
+			frameCloud->points[i].x = pts[i].y;
+			frameCloud->points[i].y = pts[i].x;
+			frameCloud->points[i].z = 0;
 		}
 
-    	if(frameNum == 100)
-			*gCloud = *frameCloud;
+		//viewer.updatePointCloud(frameCloud, "cloud");
+		//viewer.spinOnce();
 
-    	// run ICP
-		pcl::PointCloud<pcl::PointXYZ> Final;
-    	pcl::IterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
-    	icp.setInputCloud(frameCloud);
-    	icp.setInputTarget(gCloud);
-    	icp.align(Final);
+		 // Convert to ROS data type
+		pcl::PCLPointCloud2 pcl_pc2;
+		pcl::toPCLPointCloud2(*frameCloud, pcl_pc2);
 
-		size = gCloud->points.size();
-		int new_size = Final.points.size() + size;
-		gCloud->points.resize(new_size);
-		for(int i=size; i<new_size; i++) {
-			gCloud->points[i].x = Final.points[i- size].x;
-			gCloud->points[i].z = Final.points[i- size].z;
-		}
+  		sensor_msgs::PointCloud2 msg;
+  		pcl_conversions::fromPCL(pcl_pc2, msg);
+		msg.header.stamp = ros::Time::now();
+    	msg.header.frame_id = "velodyne";
 
-		pcl::copyPointCloud(*gCloud,*vizCloud);
-		for(int i=0; i<vizCloud->points.size(); i++) {
-			// pack r/g/b into rgb
-			uint8_t r = 255, g = 0, b = 0;    // Example: Red color
-			uint32_t rgb = ((uint32_t)r << 16 | (uint32_t)g << 8 | (uint32_t)b);
-			vizCloud->points[i].rgb = *reinterpret_cast<float*>(&rgb);
-		}
-		viewer.showCloud (vizCloud);
-					
+		// Publish the data
+  		pub.publish(msg);
+		ros::spinOnce();
 
-		int key = waitKey(1);
+		int key = waitKey(33);
 		if(key == 114)
 			ipm = NULL;
 
