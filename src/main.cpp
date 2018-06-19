@@ -13,7 +13,12 @@
 #include <pcl/visualization/pcl_visualizer.h>
 #include <pcl/conversions.h>
 #include <pcl/PCLPointCloud2.h>
+
 #include "ros/ros.h"
+#include "tf/transform_broadcaster.h"
+#include "tf/LinearMath/Vector3.h"
+#include "tf/LinearMath/Quaternion.h"
+#include "nav_msgs/Odometry.h"
 #include "sensor_msgs/PointCloud2.h"
 #include "pcl_conversions/pcl_conversions.h"
 
@@ -32,17 +37,75 @@ struct odom_t {
 };
 
 struct particle_t {
-	float x, y;
+	float x, y, i;
 };
-const double CAM_DST = 7.45;
+const double CAM_DST = 8.0;
+
+ros::Publisher odom_pub;
+
+
+/**
+    Publish tf from parent frame to child frame
+    @param parent: parent frame string
+    @param x:     x position coordinate
+    @param y:     y position coordinate
+    @param z:     z position coordinate
+    @param roll:    roll value
+    @param pitch:   pitch value
+    @param yaw:     yaw value
+*/
+void rosPubTf(const ros::Time& stamp, char *parent, char *child, float x, float y, float z, float roll, float pitch, float yaw) {
+
+    static tf::TransformBroadcaster br;
+    tf::Transform transform;
+    transform.setOrigin( tf::Vector3(x,y,z) );
+    tf::Quaternion q;
+    q.setEuler(roll, pitch, yaw);
+    transform.setRotation(q);
+    br.sendTransform(tf::StampedTransform(transform, stamp, parent, child));
+}
+
+
+/**
+    Publish odometry message
+    @param topic: topic name string
+    @param x:     x position coordinate
+    @param y:     y position coordinate
+    @param yaw:   yaw value
+*/
+void rosPubOdom(const ros::Time& stamp, float x, float y, float yaw, float vx, float vy) {
+
+    tf::Quaternion q(0,0,0,0);
+    q.setEuler(0, 0, yaw);
+
+    nav_msgs::Odometry msg;
+    msg.header.stamp = stamp;
+    msg.header.frame_id = "odom";
+
+    msg.pose.pose.orientation.x = q.getX();
+    msg.pose.pose.orientation.y = q.getY();
+    msg.pose.pose.orientation.z = q.getZ();
+    msg.pose.pose.orientation.w = q.getW();
+    msg.pose.pose.position.x = x;
+    msg.pose.pose.position.y = y;
+
+
+    msg.child_frame_id = "velodyne";
+    msg.twist.twist.linear.x = vx;
+    msg.twist.twist.linear.y = vy;
+
+    odom_pub.publish(msg);
+}
+
+
 
 int main( int argc, char** argv )
 {
 
     ros::init(argc, argv, "ipm_cloud");
     ros::NodeHandle n;
-    ros::Publisher pub = n.advertise<sensor_msgs::PointCloud2>("velodyne_points", 0);
-
+    ros::Publisher pub = n.advertise<sensor_msgs::PointCloud2>("filtered_points", 32);
+	odom_pub = n.advertise<nav_msgs::Odometry>("odom", 32);
 
 	// Images
 	cv::Mat frame;
@@ -139,7 +202,7 @@ int main( int argc, char** argv )
 		odoms.push_back(o);
 	}
 
-	pcl::PointCloud<pcl::PointXYZ>::Ptr frameCloud(new pcl::PointCloud<pcl::PointXYZ>); 
+	pcl::PointCloud<pcl::PointXYZI>::Ptr frameCloud(new pcl::PointCloud<pcl::PointXYZI>); 
 
 /*
     pcl::visualization::PCLVisualizer viewer ("Cloud Viewer");
@@ -212,11 +275,11 @@ int main( int argc, char** argv )
 		float dt = 0.033;
 		float grid2mt = 10.0/90.0;
 
-		//yaw = -odoms[frameNum].yaw;
+		yaw += odoms[frameNum].yawrate*dt;
 		double yaw_sin = sin(yaw);
 		double yaw_cos = cos(yaw);
-		//pose.x += yaw_cos*odoms[frameNum].speed*dt;
-		//pose.y += yaw_sin*odoms[frameNum].speed*dt;
+		pose.x += yaw_cos*odoms[frameNum].speed*dt;
+		pose.y += yaw_sin*odoms[frameNum].speed*dt;
 
 		particle_t pts[100*100];
 		int n_pts = 0;
@@ -224,13 +287,13 @@ int main( int argc, char** argv )
 			for(int j=0; j<occgrid.cols; j++) {
 				uint8_t val = occgrid.data[i*occgrid.cols + j];
 				double lx = occgrid.cols/2 - j;
-				double ly = occgrid.rows - i; //- CAM_DST*grid2mt;
-				double rx = lx*yaw_cos - ly*yaw_sin;
-				double ry = lx*yaw_sin + ly*yaw_cos;
+				double ly = occgrid.rows - i + CAM_DST/grid2mt;
+				//double rx = lx*yaw_cos - ly*yaw_sin;
+				//double ry = lx*yaw_sin + ly*yaw_cos;
 
 				if(val > 0) {
-					pts[n_pts].x = pose.x + double(rx)*grid2mt;
-					pts[n_pts].y = pose.y + double(ry)*grid2mt;
+					pts[n_pts].x = double(lx)*grid2mt;
+					pts[n_pts].y = double(ly)*grid2mt;
 					n_pts++;
 				}
 			}
@@ -242,6 +305,7 @@ int main( int argc, char** argv )
 			frameCloud->points[i].x = pts[i].y;
 			frameCloud->points[i].y = pts[i].x;
 			frameCloud->points[i].z = 0;
+			frameCloud->points[i].intensity = pts[i].i;
 		}
 
 		//viewer.updatePointCloud(frameCloud, "cloud");
@@ -258,7 +322,14 @@ int main( int argc, char** argv )
 
 		// Publish the data
   		pub.publish(msg);
+
+
+		rosPubOdom(msg.header.stamp, pose.x, pose.y, yaw, 0, 0);
+		rosPubTf(msg.header.stamp, "odom", "velodyne", pose.x, pose.y, 0, 0, 0, yaw);
+		rosPubTf(msg.header.stamp, "odom", "keyframe", pose.x, pose.y, 0, 0, 0, yaw);
+
 		ros::spinOnce();
+
 
 		int key = waitKey(33);
 		if(key == 114)
