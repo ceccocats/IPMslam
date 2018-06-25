@@ -22,7 +22,7 @@ struct odom_t {
 struct particle_t {
 	float x, y, yaw, score;
 };
-const int N_PART = 1000;
+const int N_PART = 100;
 
 const double CAM_DST = 7.45;
 
@@ -58,19 +58,21 @@ int main( int _argc, char** _argv )
 	cout << "Input video: (" << width << "x" << height << ") at " << fps << ", fourcc = " << fourcc << endl;
 
 	int slider[5];
+	/*
 	slider[0] = 955;
 	slider[1] = 472;
 	slider[2] = 178;
 	slider[3] = 74;
 	slider[4] = 1;//166;
-    /*
-	slider[0] = 1500;
-	slider[1] = 580;
-	slider[2] = 1040;
-	slider[3] = 817;
-	slider[4] = 120;
     */
-	/// Create Windows
+
+	slider[0] = 966;
+	slider[1] = 638;
+	slider[2] = 988;
+	slider[3] = 876;
+	slider[4] = 2;
+   
+   /// Create Windows
 	namedWindow("roadslam", 1);
 	createTrackbar( "s0", "roadslam", &slider[0], width*4, NULL );
 	createTrackbar( "s1", "roadslam", &slider[1], height*2, NULL );
@@ -192,7 +194,7 @@ int main( int _argc, char** _argv )
 		// thresh
 		resize(top, outputImg, Size(), 0.05, 0.05);
 		blur(outputImg, occgrid, Size(3, 3));
-		adaptiveThreshold(occgrid, occgrid, 255, CV_ADAPTIVE_THRESH_MEAN_C,THRESH_BINARY,7,-slider[4]);
+		adaptiveThreshold(occgrid, occgrid, 255, CV_ADAPTIVE_THRESH_MEAN_C,THRESH_BINARY,5,-slider[4]);
 		
 		// View		
 		resize(inputImg, showImg0, Size(), 0.3, 0.3);
