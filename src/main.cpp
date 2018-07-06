@@ -289,7 +289,9 @@ int main( int _argc, char** _argv )
 				int resampled = 0;
 				for(int p=0; p<N_PART; p++) {
 					particle_t *part = &particles[p];
-					if(part->score < score_sum/N_PART) {
+					double w = part->score /score_sum;
+
+					if(w < 1.0/N_PART) {
 						resampled++;
 						particles[p] = particles[best_part];
 					}
